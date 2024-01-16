@@ -149,13 +149,9 @@ spec:
 
         /opt/intel/openvino_2020.3.355/deployment_tools/inference_engine/lib/intel64/myriad_compile
         -m "${XML}" -VPU_MYRIAD_PLATFORM VPU_MYRIAD_2450 -VPU_NUMBER_OF_SHAVES 8
-        -VPU_NUMBER_OF_CMX_SLICES 8 -o "resnet_v1-50.unn"
+        -VPU_NUMBER_OF_CMX_SLICES 8 -o $UNN
 
         ls -a
-
-        pwd
-
-        echo ${UNN}
 
         exit 0
   workspaces:
@@ -237,9 +233,11 @@ spec:
 
         echo "TOKEN retrieved"
 
-        curl https://s3.eu-de.cloud-object-storage.appdomain.cloud/roks-cl90hsof0l2k00htpddg-0288/resnet_v1-50.pb -H "authorization: bearer $TOKEN" -o resnet_v1-50.pb
+        curl https://s3.eu-de.cloud-object-storage.appdomain.cloud/roks-cl90hsof0l2k00htpddg-0288/resnet_v1-50.pb -H "authorization: bearer $TOKEN" -o ${MODEL_STORE_KEY}
 
         echo "File Downloaded"
+        
+        ls -a
 
         exit 0
   workspaces:

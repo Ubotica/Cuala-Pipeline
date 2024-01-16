@@ -38,8 +38,6 @@ spec:
       workspaces:
         - name: output
           workspace: cuala-workspace
-        - name: ssh-directory
-          workspace: git-credentials
     - name: download-model
       runAfter:
         - fetch-repository
@@ -55,6 +53,8 @@ spec:
           value: $(tasks.download-model.results.model-name)
         - name: uploaded-file-name
           value: $(tasks.download-model.results.uploaded-file-name)
+        - name: input-size
+          value: $(tasks.download-model.results.input-size)
       runAfter:
         - download-model
       taskRef:
@@ -106,7 +106,7 @@ spec:
         name: sendmail
   workspaces:
     - name: cuala-workspace
-    - name: git-credentials
+
 ---
 apiVersion: tekton.dev/v1beta1
 kind: Task
@@ -173,8 +173,20 @@ spec:
     - description: the name from the model config.json file
       name: model-name
       type: string
+    - description: user's email address
+      name: user-email
+      type: string
     - description: the name from the model file uploaded by the user
       name: uploaded-file-name
+      type: string
+    - description: size of the input array to the model during inference
+      name: input-size
+      type: string
+    - description: preprocessing mean
+      name: mean
+      type: string
+    - description: preprocesing scale
+      name: scale
       type: string
   steps:
     - env:
@@ -191,21 +203,23 @@ spec:
 
         eval "export $(cat config.json | jq -r 'to_entries |
 
-
         map("\(.key)=\(.value)") | @sh')" 
-
 
         eval "export $(echo ${MODEL} | jq -r 'to_entries |
 
-
         map("\(.key)=\(.value)") | @sh')"
-
 
         echo ${MODEL_NAME} | tee $(results.model-name.path)
 
+        echo ${USER_EMAIL} | tee $(results.user-email.path)
 
         echo ${MODEL_STORE_KEY} | tee $(results.uploaded-file-name.path)
 
+        echo ${INPUT_SIZE} | tee $(results.input-size.path)
+
+        echo ${MEAN} | tee $(results.mean.path)
+
+        echo ${SCALE} | tee $(results.scale.path)
 
         set | grep MODEL
 
@@ -220,9 +234,7 @@ spec:
 
         echo "TOKEN retrieved"
 
-        curl
-        https://s3.eu-de.cloud-object-storage.appdomain.cloud/roks-cl90hsof0l2k00htpddg-0288/resnet_v1-50.pb
-        -H "authorization: bearer $TOKEN" -o resnet_v1-50.pb
+        curl https://s3.eu-de.cloud-object-storage.appdomain.cloud/roks-cl90hsof0l2k00htpddg-0288/resnet_v1-50.pb -H "authorization: bearer $TOKEN" -o resnet_v1-50.pb
 
         echo "File Downloaded"
 
@@ -243,6 +255,8 @@ spec:
       type: string
     - name: uploaded-file-name
       type: string
+    - name: input-size
+      type: string
   results:
     - description: the name from the model config.json file
       name: model-name
@@ -254,39 +268,44 @@ spec:
       script: >
         #!/usr/bin/env bash
 
+
         cd /workspace/output
 
-        pwd
 
         echo $(params.uploaded-file-name) 
 
+
         MODEL=$(params.uploaded-file-name)
+
 
         echo $(params.model-name) 
 
+
         MODELNAME=$(params.model-name)
 
+
         echo ${MODELNAME} | tee $(results.model-name.path)
+
 
         MODELBIN=$MODELNAME.bin
 
 
+        INPUTSIZE=$(params.input-size)
+
+        echo ${INPUTSIZE}
+
         source /opt/intel/openvino_2020.3.355/bin/setupvars.sh
 
-        python3
-        /opt/intel/openvino_2020.3.355/deployment_tools/model_optimizer/mo.py
-        --input_model resnet_v1-50.pb --input_shape [1,224,224,3] --data_type
-        FP16 --output_dir "."
-
-        echo "TESTING OUTPUT"
-
-        ls -a
+        python3 /opt/intel/openvino_2020.3.355/deployment_tools/model_optimizer/run_mo.py --file ${MODEL} --input ${INPUTSIZE}
 
         chmod 777 $MODELBIN
 
+
         chmod 777 $MODELNAME.mapping
 
+
         chmod 777 $MODELNAME.xml
+
 
         exit 0
   workspaces:

@@ -38,6 +38,8 @@ spec:
       workspaces:
         - name: output
           workspace: cuala-workspace
+        - name: ssh-directory
+          workspace: git-credentials
     - name: download-model
       runAfter:
         - fetch-repository
@@ -106,6 +108,7 @@ spec:
         name: sendmail
   workspaces:
     - name: cuala-workspace
+    - name: git-credentials
 
 ---
 apiVersion: tekton.dev/v1beta1

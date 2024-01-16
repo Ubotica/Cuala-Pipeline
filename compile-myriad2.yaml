@@ -1,0 +1,51 @@
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: compile-myriad2
+spec:
+  params:
+    - name: model-name
+      type: string
+  results:
+    - description: the name from the model config.json file
+      name: model-name
+      type: string
+    - description: the name from the unn file
+      name: unn
+      type: string
+  steps:
+    - image: quay.io/iain_keaney/cuala
+      name: ''
+      resources: {}
+      script: >
+        #!/usr/bin/env bash
+
+        cd /workspace/output
+
+        MODELNAME=$(params.model-name)
+
+        echo ${MODELNAME} | tee $(results.model-name.path)
+
+        XML=$MODELNAME.xml
+
+        UNN=$MODELNAME.unn
+
+        echo ${UNN} | tee $(results.unn.path)
+
+        source /opt/intel/openvino_2020.3.355/bin/setupvars.sh
+
+        /opt/intel/openvino_2020.3.355/deployment_tools/inference_engine/lib/intel64/myriad_compile
+        -m "${XML}" -VPU_MYRIAD_PLATFORM VPU_MYRIAD_2450 -VPU_NUMBER_OF_SHAVES 8
+        -VPU_NUMBER_OF_CMX_SLICES 8 -o "resnet_v1-50.unn"
+
+        ls -a
+
+        pwd
+
+        echo ${UNN}
+
+        exit 0
+  workspaces:
+    - description: Compiles .unn model for the Myriad 2 device.
+      name: output
+

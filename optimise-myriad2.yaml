@@ -1,0 +1,60 @@
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: optimise-myriad2
+spec:
+  params:
+    - name: model-name
+      type: string
+    - name: uploaded-file-name
+      type: string
+  results:
+    - description: the name from the model config.json file
+      name: model-name
+      type: string
+  steps:
+    - image: quay.io/iain_keaney/cuala
+      name: ''
+      resources: {}
+      script: >
+        #!/usr/bin/env bash
+
+        cd /workspace/output
+
+        pwd
+
+        echo $(params.uploaded-file-name) 
+
+        MODEL=$(params.uploaded-file-name)
+
+        echo $(params.model-name) 
+
+        MODELNAME=$(params.model-name)
+
+        echo ${MODELNAME} | tee $(results.model-name.path)
+
+        MODELBIN=$MODELNAME.bin
+
+
+        source /opt/intel/openvino_2020.3.355/bin/setupvars.sh
+
+        python3
+        /opt/intel/openvino_2020.3.355/deployment_tools/model_optimizer/mo.py
+        --input_model resnet_v1-50.pb --input_shape [1,224,224,3] --data_type
+        FP16 --output_dir "."
+
+        echo "TESTING OUTPUT"
+
+        ls -a
+
+        chmod 777 $MODELBIN
+
+        chmod 777 $MODELNAME.mapping
+
+        chmod 777 $MODELNAME.xml
+
+        exit 0
+  workspaces:
+    - description: Compiles .unn model for the Myriad 2 device.
+      name: output
+

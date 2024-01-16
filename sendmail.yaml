@@ -1,0 +1,116 @@
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  annotations:
+    kubectl.kubernetes.io/last-applied-configuration: >
+      {"apiVersion":"tekton.dev/v1beta1","kind":"Task","metadata":{"annotations":{"tekton.dev/categories":"Messaging","tekton.dev/displayName":"send
+      mail","tekton.dev/pipelines.minVersion":"0.12.1","tekton.dev/platforms":"linux/amd64,linux/s390x,linux/ppc64le,linux/arm64","tekton.dev/tags":"mail"},"labels":{"app.kubernetes.io/version":"0.1"},"name":"sendmail","namespace":"pipeline-tutorial"},"spec":{"description":"This
+      task sends a simple email to receivers via SMTP
+      server","params":[{"description":"secret name for SMTP server information
+      (url, port,
+      password)","name":"server","type":"string"},{"description":"plain text
+      email subject","name":"subject","type":"string"},{"description":"plain
+      text email body","name":"body","type":"string"},{"description":"sender
+      email address","name":"sender","type":"string"},{"description":"recipient
+      email addresses (space delimited
+      list)","name":"recipients","type":"string"}],"steps":[{"env":[{"name":"USER","valueFrom":{"secretKeyRef":{"key":"user","name":"$(params.server)"}}},{"name":"PASSWORD","valueFrom":{"secretKeyRef":{"key":"password","name":"$(params.server)"}}},{"name":"TLS","valueFrom":{"secretKeyRef":{"key":"tls","name":"$(params.server)"}}},{"name":"SERVER","valueFrom":{"secretKeyRef":{"key":"url","name":"$(params.server)"}}},{"name":"PORT","valueFrom":{"secretKeyRef":{"key":"port","name":"$(params.server)"}}}],"image":"docker.io/library/python:3.8-alpine@sha256:e11bbd37d4371894e954421b85dbe8dd4eb7198d7cb4ed144ab529f19f57c3f1","name":"send","script":"#!/usr/bin/env
+      python3\nimport smtplib, ssl, os\nport = os.getenv('PORT')\nsmtp_server =
+      os.getenv('SERVER')\nsender_email = \"$(params.sender)\"\nreceiver_emails
+      = \"$(params.recipients)\"\nuser = os.getenv('USER')\npassword =
+      os.getenv('PASSWORD')\ntls = os.getenv('TLS')\nmessage =
+      f\"\"\"\\\nSubject: $(params.subject)\nTo: {receiver_emails}\nFrom:
+      {sender_email}\n\n$(params.body)\"\"\"\nprint(message)\nif tls ==
+      'True':\n    context = ssl.create_default_context()\n    server =
+      smtplib.SMTP_SSL(smtp_server, port, context=context)\nelse:\n    server =
+      smtplib.SMTP(smtp_server, port)\nif password != '':\n   
+      server.login(user, password)\nfor receiver in [item for item in
+      receiver_emails.split(' ') if item]:\n    server.sendmail(sender_email,
+      receiver, message.encode('utf-8'))\nserver.quit()\n"}]}}
+    tekton.dev/categories: Messaging
+    tekton.dev/displayName: send mail
+    tekton.dev/pipelines.minVersion: 0.12.1
+    tekton.dev/platforms: 'linux/amd64,linux/s390x,linux/ppc64le,linux/arm64'
+    tekton.dev/tags: mail
+  name: sendmail
+  namespace: cuala-mvp
+  labels:
+    app.kubernetes.io/version: '0.1'
+spec:
+  description: This task sends a simple email to receivers via SMTP server
+  params:
+    - description: 'secret name for SMTP server information (url, port, password)'
+      name: server
+      type: string
+    - description: plain text email subject
+      name: subject
+      type: string
+    - description: plain text email body
+      name: body
+      type: string
+    - description: sender email address
+      name: sender
+      type: string
+    - description: recipient email addresses (space delimited list)
+      name: recipients
+      type: string
+  steps:
+    - env:
+        - name: USER
+          valueFrom:
+            secretKeyRef:
+              key: user
+              name: $(params.server)
+        - name: PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: password
+              name: $(params.server)
+        - name: TLS
+          valueFrom:
+            secretKeyRef:
+              key: tls
+              name: $(params.server)
+        - name: SERVER
+          valueFrom:
+            secretKeyRef:
+              key: url
+              name: $(params.server)
+        - name: PORT
+          valueFrom:
+            secretKeyRef:
+              key: port
+              name: $(params.server)
+      image: >-
+        docker.io/library/python:3.8-alpine@sha256:e11bbd37d4371894e954421b85dbe8dd4eb7198d7cb4ed144ab529f19f57c3f1
+      name: send
+      resources: {}
+      script: |
+        #!/usr/bin/env python3
+        import smtplib, os
+        from email.mime.multipart import MIMEMultipart
+        from email.mime.text import MIMEText
+
+        port = os.getenv('PORT')
+        smtp_server = os.getenv('SERVER')
+        sender_email = "$(params.sender)"
+        receiver_emails = "$(params.recipients)"
+        body = "Test"
+
+        print(sender_email)
+
+        password = os.getenv('PASSWORD')
+
+        message = MIMEMultipart()
+        message['Subject'] = "$(params.subject)"
+        message['From'] = sender_email
+        message['To'] = receiver_emails
+        html_part = MIMEText(body)
+
+        message.attach(html_part)
+
+        print(message.as_string())
+
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+          server.login(sender_email, password)
+          server.sendmail(sender_email, receiver_emails, message.as_string())
+

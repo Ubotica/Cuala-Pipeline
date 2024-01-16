@@ -1,0 +1,608 @@
+apiVersion: tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  name: compile-model
+spec:
+  params:
+    - description: name of the deployment to be patched
+      name: deployment-name
+      type: string
+    - description: url of the git repo for the code of deployment
+      name: git-url
+      type: string
+    - default: pipelines-1.9
+      description: revision to be used from repo of the code for deployment
+      name: git-revision
+      type: string
+    - description: image to be built from the code
+      name: IMAGE
+      type: string
+    - default: cos-bucket
+      description: access key for storage bucket
+      name: storage_secret
+      type: string
+  tasks:
+    - name: fetch-repository
+      params:
+        - name: url
+          value: $(params.git-url)
+        - name: subdirectory
+          value: ''
+        - name: deleteExisting
+          value: 'true'
+        - name: revision
+          value: $(params.git-revision)
+      taskRef:
+        kind: ClusterTask
+        name: git-clone
+      workspaces:
+        - name: output
+          workspace: cuala-workspace
+        - name: ssh-directory
+          workspace: git-credentials
+    - name: download-model
+      runAfter:
+        - fetch-repository
+      taskRef:
+        kind: Task
+        name: download-model
+      workspaces:
+        - name: output
+          workspace: cuala-workspace
+    - name: optimise-model
+      params:
+        - name: model-name
+          value: $(tasks.download-model.results.model-name)
+        - name: uploaded-file-name
+          value: $(tasks.download-model.results.uploaded-file-name)
+      runAfter:
+        - download-model
+      taskRef:
+        kind: Task
+        name: optimise-myriad2
+      workspaces:
+        - name: output
+          workspace: cuala-workspace
+    - name: convert-model
+      params:
+        - name: model-name
+          value: $(tasks.optimise-model.results.model-name)
+      runAfter:
+        - optimise-model
+      taskRef:
+        kind: Task
+        name: compile-myriad2
+      workspaces:
+        - name: output
+          workspace: cuala-workspace
+    - name: upload-model
+      params:
+        - name: unn
+          value: $(tasks.convert-model.results.unn)
+      runAfter:
+        - convert-model
+      taskRef:
+        kind: Task
+        name: upload-file
+      workspaces:
+        - name: output
+          workspace: cuala-workspace
+    - name: sendemail
+      params:
+        - name: server
+          value: server-secret
+        - name: subject
+          value: 'Ubotica: Model Coversion Complete'
+        - name: body
+          value: Tekton email
+        - name: sender
+          value: iain.keaney@ubotica.com
+        - name: recipients
+          value: iain.keaney@gmail.com
+      runAfter:
+        - upload-model
+      taskRef:
+        kind: Task
+        name: sendmail
+  workspaces:
+    - name: cuala-workspace
+    - name: git-credentials
+---
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: compile-myriad2
+spec:
+  params:
+    - name: model-name
+      type: string
+  results:
+    - description: the name from the model config.json file
+      name: model-name
+      type: string
+    - description: the name from the unn file
+      name: unn
+      type: string
+  steps:
+    - image: quay.io/iain_keaney/cuala
+      name: ''
+      resources: {}
+      script: >
+        #!/usr/bin/env bash
+
+        cd /workspace/output
+
+        MODELNAME=$(params.model-name)
+
+        echo ${MODELNAME} | tee $(results.model-name.path)
+
+        XML=$MODELNAME.xml
+
+        UNN=$MODELNAME.unn
+
+        echo ${UNN} | tee $(results.unn.path)
+
+        source /opt/intel/openvino_2020.3.355/bin/setupvars.sh
+
+        /opt/intel/openvino_2020.3.355/deployment_tools/inference_engine/lib/intel64/myriad_compile
+        -m "${XML}" -VPU_MYRIAD_PLATFORM VPU_MYRIAD_2450 -VPU_NUMBER_OF_SHAVES 8
+        -VPU_NUMBER_OF_CMX_SLICES 8 -o "resnet_v1-50.unn"
+
+        ls -a
+
+        pwd
+
+        echo ${UNN}
+
+        exit 0
+  workspaces:
+    - description: Compiles .unn model for the Myriad 2 device.
+      name: output
+---
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: download-model
+spec:
+  params:
+    - default: cos-bucket
+      description: access key for storage bucket
+      name: storage_secret
+      type: string
+  results:
+    - description: the name from the model config.json file
+      name: model-name
+      type: string
+    - description: the name from the model file uploaded by the user
+      name: uploaded-file-name
+      type: string
+  steps:
+    - env:
+        - name: APIKEY
+          valueFrom:
+            secretKeyRef:
+              key: api-key
+              name: $(params.storage_secret)
+      image: 'iainubo/ubi-micro-jq:latest'
+      name: ''
+      resources: {}
+      script: >
+        cd workspace/output
+
+        eval "export $(cat config.json | jq -r 'to_entries |
+
+
+        map("\(.key)=\(.value)") | @sh')" 
+
+
+        eval "export $(echo ${MODEL} | jq -r 'to_entries |
+
+
+        map("\(.key)=\(.value)") | @sh')"
+
+
+        echo ${MODEL_NAME} | tee $(results.model-name.path)
+
+
+        echo ${MODEL_STORE_KEY} | tee $(results.uploaded-file-name.path)
+
+
+        set | grep MODEL
+
+
+        TOKEN=`curl -X "POST" "https://iam.cloud.ibm.com/oidc/token" \
+            -H 'Accept: application/json' \
+            -H 'Content-Type: application/x-www-form-urlencoded' \
+            --data-urlencode "apikey=${APIKEY}" \
+            --data-urlencode "response_type=cloud_iam" \
+            --data-urlencode "grant_type=urn:ibm:params:oauth:grant-type:apikey" \
+            -s | jq -r '.access_token'`
+
+        echo "TOKEN retrieved"
+
+        curl
+        https://s3.eu-de.cloud-object-storage.appdomain.cloud/roks-cl90hsof0l2k00htpddg-0288/resnet_v1-50.pb
+        -H "authorization: bearer $TOKEN" -o resnet_v1-50.pb
+
+        echo "File Downloaded"
+
+        exit 0
+  workspaces:
+    - description: >-
+        Trained model file will be downloaded from object storage to this
+        Workspace.
+      name: output
+---
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: optimise-myriad2
+spec:
+  params:
+    - name: model-name
+      type: string
+    - name: uploaded-file-name
+      type: string
+  results:
+    - description: the name from the model config.json file
+      name: model-name
+      type: string
+  steps:
+    - image: quay.io/iain_keaney/cuala
+      name: ''
+      resources: {}
+      script: >
+        #!/usr/bin/env bash
+
+        cd /workspace/output
+
+        pwd
+
+        echo $(params.uploaded-file-name) 
+
+        MODEL=$(params.uploaded-file-name)
+
+        echo $(params.model-name) 
+
+        MODELNAME=$(params.model-name)
+
+        echo ${MODELNAME} | tee $(results.model-name.path)
+
+        MODELBIN=$MODELNAME.bin
+
+
+        source /opt/intel/openvino_2020.3.355/bin/setupvars.sh
+
+        python3
+        /opt/intel/openvino_2020.3.355/deployment_tools/model_optimizer/mo.py
+        --input_model resnet_v1-50.pb --input_shape [1,224,224,3] --data_type
+        FP16 --output_dir "."
+
+        echo "TESTING OUTPUT"
+
+        ls -a
+
+        chmod 777 $MODELBIN
+
+        chmod 777 $MODELNAME.mapping
+
+        chmod 777 $MODELNAME.xml
+
+        exit 0
+  workspaces:
+    - description: Compiles .unn model for the Myriad 2 device.
+      name: output
+---
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  annotations:
+    tekton.dev/categories: Messaging
+    tekton.dev/displayName: send mail
+    tekton.dev/pipelines.minVersion: 0.12.1
+    tekton.dev/platforms: 'linux/amd64,linux/s390x,linux/ppc64le,linux/arm64'
+    tekton.dev/tags: mail
+  name: sendmail
+  labels:
+    app.kubernetes.io/version: '0.1'
+spec:
+  description: This task sends a simple email to receivers via SMTP server
+  params:
+    - description: 'secret name for SMTP server information (url, port, password)'
+      name: server
+      type: string
+    - description: plain text email subject
+      name: subject
+      type: string
+    - description: plain text email body
+      name: body
+      type: string
+    - description: sender email address
+      name: sender
+      type: string
+    - description: recipient email addresses (space delimited list)
+      name: recipients
+      type: string
+  steps:
+    - env:
+        - name: USER
+          valueFrom:
+            secretKeyRef:
+              key: user
+              name: $(params.server)
+        - name: PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: password
+              name: $(params.server)
+        - name: TLS
+          valueFrom:
+            secretKeyRef:
+              key: tls
+              name: $(params.server)
+        - name: SERVER
+          valueFrom:
+            secretKeyRef:
+              key: url
+              name: $(params.server)
+        - name: PORT
+          valueFrom:
+            secretKeyRef:
+              key: port
+              name: $(params.server)
+      image: >-
+        docker.io/library/python:3.8-alpine@sha256:e11bbd37d4371894e954421b85dbe8dd4eb7198d7cb4ed144ab529f19f57c3f1
+      name: send
+      resources: {}
+      script: |
+        #!/usr/bin/env python3
+        import smtplib, os
+        from email.mime.multipart import MIMEMultipart
+        from email.mime.text import MIMEText
+
+        port = os.getenv('PORT')
+        smtp_server = os.getenv('SERVER')
+        sender_email = "$(params.sender)"
+        receiver_emails = "$(params.recipients)"
+        body = "Test"
+
+        print(sender_email)
+
+        password = os.getenv('PASSWORD')
+
+        message = MIMEMultipart()
+        message['Subject'] = "$(params.subject)"
+        message['From'] = sender_email
+        message['To'] = receiver_emails
+        html_part = MIMEText(body)
+
+        message.attach(html_part)
+
+        print(message.as_string())
+
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+          server.login(sender_email, password)
+          server.sendmail(sender_email, receiver_emails, message.as_string())
+---
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: upload-file
+spec:
+  params:
+    - name: unn
+      type: string
+    - default: cos-bucket
+      description: access key for storage bucket
+      name: storage_secret
+      type: string
+  results:
+    - description: the name from the model file uploaded by the user
+      name: uploaded-file-name
+      type: string
+  steps:
+    - env:
+        - name: APIKEY
+          valueFrom:
+            secretKeyRef:
+              key: api-key
+              name: $(params.storage_secret)
+      image: 'iainubo/ubi-micro-jq:latest'
+      name: ''
+      resources: {}
+      script: >
+        cd /workspace/output
+
+        pwd
+
+        ls -a
+
+        UNN=$(params.unn)
+
+        TOKEN=`curl -X "POST" "https://iam.cloud.ibm.com/oidc/token" \
+            -H 'Accept: application/json' \
+            -H 'Content-Type: application/x-www-form-urlencoded' \
+            --data-urlencode "apikey=${APIKEY}" \
+            --data-urlencode "response_type=cloud_iam" \
+            --data-urlencode "grant_type=urn:ibm:params:oauth:grant-type:apikey" \
+            -s | jq -r '.access_token'`
+
+        curl -X "PUT"
+        "https://s3.eu-de.cloud-object-storage.appdomain.cloud/roks-cl90hsof0l2k00htpddg-0288/${UNN}"
+        -H "Authorization: bearer $TOKEN" -H "Content-Type:
+        application/octet-stream" --data-binary "@${UNN}"
+
+        exit 0
+  workspaces:
+    - description: >-
+        Trained model file will be downloaded from object storage to this
+        Workspace.
+      name: output
+
+---
+
+apiVersion: triggers.tekton.dev/v1alpha1
+kind: EventListener
+metadata:
+  name: vote-app
+spec:
+  namespaceSelector: {}
+  resources: {}
+  serviceAccountName: pipeline
+  triggers:
+    - triggerRef: vote-app
+status:
+  conditions:
+    - lastTransitionTime: '2023-12-05T10:57:48Z'
+      message: Deployment has minimum availability.
+      reason: MinimumReplicasAvailable
+      status: 'True'
+      type: Available
+    - lastTransitionTime: '2023-12-15T18:06:16Z'
+      message: Deployment exists
+      status: 'True'
+      type: Deployment
+    - lastTransitionTime: '2023-12-15T18:06:16Z'
+      message: ReplicaSet "el-vote-app-695bb7bf74" has successfully progressed.
+      reason: NewReplicaSetAvailable
+      status: 'True'
+      type: Progressing
+    - lastTransitionTime: '2023-12-15T18:06:16Z'
+      message: EventListener is ready
+      status: 'True'
+      type: Ready
+    - lastTransitionTime: '2023-12-15T18:06:16Z'
+      message: Service exists
+      status: 'True'
+      type: Service
+  configuration:
+    generatedName: el-vote-app
+    
+---
+
+apiVersion: triggers.tekton.dev/v1alpha1
+kind: TriggerTemplate
+metadata:
+  name: vote-app
+spec:
+  params:
+    - description: The git repository url
+      name: git-repo-url
+    - default: pipelines-1.9
+      description: The git revision
+      name: git-revision
+    - description: The name of the deployment to be created / patched
+      name: git-repo-name
+  resourcetemplates:
+    - apiVersion: tekton.dev/v1beta1
+      kind: PipelineRun
+      metadata:
+        generateName: compile-model-$(tt.params.git-repo-name)-
+      spec:
+        params:
+          - name: deployment-name
+            value: $(tt.params.git-repo-name)
+          - name: git-url
+            value: $(tt.params.git-repo-url)
+          - name: git-revision
+            value: $(tt.params.git-revision)
+          - name: IMAGE
+            value: >-
+              image-registry.openshift-image-registry.svc:5000/$(context.pipelineRun.namespace)/$(tt.params.git-repo-name)
+        pipelineRef:
+          name: compile-model
+        serviceAccountName: pipeline
+        workspaces:
+          - name: cuala-workspace
+            volumeClaimTemplate:
+              spec:
+                accessModes:
+                  - ReadWriteOnce
+                resources:
+                  requests:
+                    storage: 500Mi
+          - name: git-credentials
+            secret:
+              secretName: git-credentials
+
+---
+
+apiVersion: triggers.tekton.dev/v1alpha1
+kind: TriggerBinding
+metadata:
+  name: vote-app
+spec:
+  params:
+    - name: git-repo-url
+      value: $(body.repository.ssh_url)
+    - name: git-repo-name
+      value: $(body.repository.name)
+    - name: git-revision
+      value: $(body.head_commit.id)
+
+---
+
+kind: Route
+apiVersion: route.openshift.io/v1
+metadata:
+  name: el-vote-app
+spec:
+  to:
+    kind: Service
+    name: el-vote-app
+    weight: 100
+  port:
+    targetPort: http-listener
+  wildcardPolicy: None
+status:
+  ingress:
+    - routerName: default
+      conditions:
+        - type: Admitted
+          status: 'True'
+          lastTransitionTime: '2023-12-06T10:19:34Z'
+      wildcardPolicy: None
+      
+---
+
+kind: Service
+apiVersion: v1
+metadata:
+  name: el-vote-app
+spec:
+  ipFamilies:
+    - IPv4
+  ports:
+    - name: http-listener
+      protocol: TCP
+      port: 8080
+      targetPort: 8080
+    - name: http-metrics
+      protocol: TCP
+      port: 9000
+      targetPort: 9000
+  internalTrafficPolicy: Cluster
+  type: ClusterIP
+  ipFamilyPolicy: SingleStack
+  sessionAffinity: None
+  selector:
+    app.kubernetes.io/managed-by: EventListener
+    app.kubernetes.io/part-of: Triggers
+    eventlistener: vote-app
+status:
+  loadBalancer: {}
+        
+---        
+
+apiVersion: triggers.tekton.dev/v1beta1
+kind: Trigger
+metadata:
+  name: vote-app
+spec:
+  bindings:
+    - kind: TriggerBinding
+      ref: vote-app
+  serviceAccountName: pipeline
+  template:
+    ref: vote-app
+

@@ -1,0 +1,89 @@
+apiVersion: tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  creationTimestamp: '2023-12-07T10:41:19Z'
+  generation: 6
+  managedFields:
+    - apiVersion: tekton.dev/v1beta1
+      fieldsType: FieldsV1
+      fieldsV1:
+        'f:spec':
+          .: {}
+          'f:params': {}
+          'f:tasks': {}
+          'f:workspaces': {}
+      manager: Mozilla
+      operation: Update
+      time: '2023-12-13T14:54:15Z'
+  name: compile-model
+  namespace: cuala-test
+  resourceVersion: '22659072'
+  uid: 1797850a-66de-4dbd-ab25-c2bb4c3c3cc5
+spec:
+  params:
+    - description: name of the deployment to be patched
+      name: deployment-name
+      type: string
+    - description: url of the git repo for the code of deployment
+      name: git-url
+      type: string
+    - default: pipelines-1.9
+      description: revision to be used from repo of the code for deployment
+      name: git-revision
+      type: string
+    - description: image to be built from the code
+      name: IMAGE
+      type: string
+    - default: cos-bucket
+      description: access key for storage bucket
+      name: storage_secret
+      type: string
+  tasks:
+    - name: fetch-repository
+      params:
+        - name: url
+          value: $(params.git-url)
+        - name: subdirectory
+          value: ''
+        - name: deleteExisting
+          value: 'true'
+        - name: revision
+          value: $(params.git-revision)
+      taskRef:
+        kind: ClusterTask
+        name: git-clone
+      workspaces:
+        - name: output
+          workspace: cuala-workspace
+        - name: ssh-directory
+          workspace: git-credentials
+    - name: fetch-repository-2
+      params:
+        - name: url
+          value: $(params.git-url)
+        - name: subdirectory
+          value: ''
+        - name: deleteExisting
+          value: 'true'
+        - name: revision
+          value: $(params.git-revision)
+      runAfter:
+        - fetch-repository
+      taskRef:
+        kind: Task
+        params:
+          - name: name
+            value: git-clone
+          - name: namespace
+            value: cuala-prod
+          - name: kind
+            value:
+              - task
+        resolver: cluster
+      workspaces:
+        - name: output
+          workspace: cuala-workspace
+  workspaces:
+    - name: cuala-workspace
+    - name: git-credentials
+

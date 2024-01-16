@@ -1,0 +1,55 @@
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: upload-file
+spec:
+  params:
+    - name: unn
+      type: string
+    - default: cos-bucket
+      description: access key for storage bucket
+      name: storage_secret
+      type: string
+  results:
+    - description: the name from the model file uploaded by the user
+      name: uploaded-file-name
+      type: string
+  steps:
+    - env:
+        - name: APIKEY
+          valueFrom:
+            secretKeyRef:
+              key: api-key
+              name: $(params.storage_secret)
+      image: 'iainubo/ubi-micro-jq:latest'
+      name: ''
+      resources: {}
+      script: >
+        cd /workspace/output
+
+        pwd
+
+        ls -a
+
+        UNN=$(params.unn)
+
+        TOKEN=`curl -X "POST" "https://iam.cloud.ibm.com/oidc/token" \
+            -H 'Accept: application/json' \
+            -H 'Content-Type: application/x-www-form-urlencoded' \
+            --data-urlencode "apikey=${APIKEY}" \
+            --data-urlencode "response_type=cloud_iam" \
+            --data-urlencode "grant_type=urn:ibm:params:oauth:grant-type:apikey" \
+            -s | jq -r '.access_token'`
+
+        curl -X "PUT"
+        "https://s3.eu-de.cloud-object-storage.appdomain.cloud/roks-cl90hsof0l2k00htpddg-0288/${UNN}"
+        -H "Authorization: bearer $TOKEN" -H "Content-Type:
+        application/octet-stream" --data-binary "@${UNN}"
+
+        exit 0
+  workspaces:
+    - description: >-
+        Trained model file will be downloaded from object storage to this
+        Workspace.
+      name: output
+

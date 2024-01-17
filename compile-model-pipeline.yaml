@@ -81,6 +81,12 @@ spec:
       params:
         - name: unn
           value: $(tasks.convert-model.results.unn)
+        - name: model-store-endpoint
+          value: $(tasks.download-model.results.model-store-endpoint)
+        - name: model-store-bucket
+          value: $(tasks.download-model.results.model-store-bucket)
+        - name: uploaded-file-name
+          value: $(tasks.download-model.results.uploaded-file-name)
       runAfter:
         - convert-model
       taskRef:
@@ -334,6 +340,12 @@ spec:
   params:
     - name: unn
       type: string
+    - name: model-store-endpoint
+      type: string
+    - name: model-store-bucket
+      type: string
+    - name: uploaded-file-name
+      type: string
     - default: cos-bucket
       description: access key for storage bucket
       name: storage_secret
@@ -359,6 +371,12 @@ spec:
 
         ls -a
 
+        MODEL_STORE_ENDPOINT=$(params.model-store-endpoint)
+
+        MODEL_STORE_BUCKET=$(params.model-store-bucket)
+
+        MODEL_STORE_KEY=$(params.uploaded-file-name)
+
         UNN=$(params.unn)
 
         TOKEN=`curl -X "POST" "https://iam.cloud.ibm.com/oidc/token" \
@@ -370,7 +388,7 @@ spec:
             -s | jq -r '.access_token'`
 
         curl -X "PUT"
-        "https://s3.eu-de.cloud-object-storage.appdomain.cloud/roks-cl90hsof0l2k00htpddg-0288/${UNN}"
+        https://${MODEL_STORE_ENDPOINT}/${MODEL_STORE_BUCKET}/${UNN}
         -H "Authorization: bearer $TOKEN" -H "Content-Type:
         application/octet-stream" --data-binary "@${UNN}"
 

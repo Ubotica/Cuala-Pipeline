@@ -198,7 +198,7 @@ spec:
         echo "TOKEN retrieved"
 
         curl
-        https://${MODEL_STORE_ENDPOINT}/${MODEL_STORE_BUCKET}/r${MODEL_STORE_KEY}
+        https://${MODEL_STORE_ENDPOINT}/${MODEL_STORE_BUCKET}/${MODEL_STORE_KEY}
         -H "authorization: bearer $TOKEN" -o ${MODEL_STORE_KEY}
 
         echo "File Downloaded"

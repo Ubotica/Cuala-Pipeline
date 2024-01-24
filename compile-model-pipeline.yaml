@@ -106,7 +106,13 @@ spec:
         - name: sender
           value: iain.keaney@ubotica.com
         - name: recipients
-          value: iain.keaney@gmail.com
+          value: $(tasks.download-model.results.user-email)
+        - name: unn
+          value: $(tasks.convert-model.results.unn)
+        - name: model-store-endpoint
+          value: $(tasks.download-model.results.model-store-endpoint)
+        - name: model-store-bucket
+          value: $(tasks.download-model.results.model-store-bucket)
       runAfter:
         - upload-model
       taskRef:
@@ -115,6 +121,7 @@ spec:
   workspaces:
     - name: cuala-workspace
     - name: git-credentials
+
 
 ---
 
@@ -167,11 +174,9 @@ spec:
         cd workspace/output
 
         eval "export $(cat config.json | jq -r 'to_entries |
-
         map("\(.key)=\(.value)") | @sh')" 
 
         eval "export $(echo ${MODEL} | jq -r 'to_entries |
-
         map("\(.key)=\(.value)") | @sh')"
 
         echo ${MODEL_NAME} | tee $(results.model-name.path)
@@ -217,6 +222,7 @@ spec:
         Trained model file will be downloaded from object storage to this
         Workspace.
       name: output
+
 ---
 apiVersion: tekton.dev/v1beta1
 kind: Task
@@ -269,7 +275,9 @@ spec:
 
         source /opt/intel/openvino_2020.3.355/bin/setupvars.sh
 
-        python3 /opt/intel/openvino_2020.3.355/deployment_tools/model_optimizer/run_mo.py --file ${MODEL} --input ${INPUTSIZE}
+        python3
+        /opt/intel/openvino_2020.3.355/deployment_tools/model_optimizer/run_mo.py
+        --file ${MODEL} --input ${INPUTSIZE}
 
         chmod 777 $MODELBIN
 
@@ -284,6 +292,7 @@ spec:
   workspaces:
     - description: Compiles .unn model for the Myriad 2 device.
       name: output
+
 ---
 apiVersion: tekton.dev/v1beta1
 kind: Task
@@ -331,6 +340,7 @@ spec:
   workspaces:
     - description: Compiles .unn model for the Myriad 2 device.
       name: output
+
 ---
 apiVersion: tekton.dev/v1beta1
 kind: Task
@@ -388,8 +398,8 @@ spec:
             -s | jq -r '.access_token'`
 
         curl -X "PUT"
-        https://${MODEL_STORE_ENDPOINT}/${MODEL_STORE_BUCKET}/${UNN}
-        -H "Authorization: bearer $TOKEN" -H "Content-Type:
+        https://${MODEL_STORE_ENDPOINT}/${MODEL_STORE_BUCKET}/${UNN} -H
+        "Authorization: bearer $TOKEN" -H "Content-Type:
         application/octet-stream" --data-binary "@${UNN}"
 
         exit 0
@@ -398,6 +408,7 @@ spec:
         Trained model file will be downloaded from object storage to this
         Workspace.
       name: output
+
 
 ---
 apiVersion: tekton.dev/v1beta1
@@ -430,6 +441,15 @@ spec:
     - description: recipient email addresses (space delimited list)
       name: recipients
       type: string
+    - description: name of .unn file
+      name: unn
+      type: string
+    - description: Object storage location
+      name: model-store-endpoint
+      type: string
+    - description: Object storage bucket
+      name: model-store-bucket
+      type: string
   steps:
     - env:
         - name: USER
@@ -461,31 +481,68 @@ spec:
         docker.io/library/python:3.8-alpine@sha256:e11bbd37d4371894e954421b85dbe8dd4eb7198d7cb4ed144ab529f19f57c3f1
       name: send
       resources: {}
-      script: |
+      script: >
         #!/usr/bin/env python3
+
         import smtplib, os
+
         from email.mime.multipart import MIMEMultipart
+
         from email.mime.text import MIMEText
 
-        port = os.getenv('PORT')
-        smtp_server = os.getenv('SERVER')
-        sender_email = "$(params.sender)"
-        receiver_emails = "$(params.recipients)"
-        body = "Test"
 
-        print(sender_email)
+        port = os.getenv('PORT')
+
+        smtp_server = os.getenv('SERVER')
+
+        sender_email = "$(params.sender)"
+
+        receiver_emails = '''$(params.recipients)'''
+
+
+        print(receiver_emails[0])
+
+        get_token = 'TOKEN=`curl -X "POST"
+        "https://iam.cloud.ibm.com/oidc/token" -H "Accept: application/json" -H
+        "Content-Type: application/x-www-form-urlencoded" --data-urlencode
+        "apikey=${APIKEY}" --data-urlencode "response_type=cloud_iam"
+        --data-urlencode "grant_type=urn:ibm:params:oauth:grant-type:apikey" -s
+        | jq -r ".access_token"`'
+
+        MODEL_STORE_ENDPOINT = '''$(params.model-store-endpoint)'''.strip()
+
+        MODEL_STORE_BUCKET = '''$(params.model-store-bucket)'''.strip() 
+
+        filename = '''$(params.unn)'''.strip()
+
+        download_cmd = f'curl https://{MODEL_STORE_ENDPOINT
+        }/{MODEL_STORE_BUCKET}/{filename} -H "authorization: bearer $TOKEN" -o
+        {filename}'
+
+        body = f" Hi \n\nYou're model has compiled correctly for the Myriad X device and is ready for download. \n\nTo download your model use your APIKEY previously provided and then run the folloing command in a bash shell to retrieve your access token: \n{get_token} \n\nNext run the following command to download your model: \n{download_cmd} \n\nShould you experience any difficulties please contact {sender_email}. "
+
 
         password = os.getenv('PASSWORD')
 
+
         message = MIMEMultipart()
+
         message['Subject'] = "$(params.subject)"
+
         message['From'] = sender_email
-        message['To'] = receiver_emails
+
+        message['To'] = receiver_emails[0]
+
+        message['Cc'] = 'iain.keaney@ubotica.com'
+
         html_part = MIMEText(body)
+
 
         message.attach(html_part)
 
+
         print(message.as_string())
+
 
         with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
           server.login(sender_email, password)

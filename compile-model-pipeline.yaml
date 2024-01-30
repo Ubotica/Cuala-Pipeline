@@ -499,6 +499,7 @@ spec:
 
         receiver_emails = '''$(params.recipients)'''
 
+        admin_email = "maria.buckley@ubotica.com"
 
         print(receiver_emails[0])
 
@@ -519,7 +520,12 @@ spec:
         }/{MODEL_STORE_BUCKET}/{filename} -H "authorization: bearer $TOKEN" -o
         {filename}'
 
-        body = f"Hi \n\nYou're model has compiled correctly for the Myriad X device and is ready for download. \n\nTo download your model use your APIKEY previously provided and then run the folloing command in a bash shell to retrieve your access token: \n\n{get_token} \n\nNext run the following command to download your model: \n\n{download_cmd} \n\nShould you experience any difficulties please contact {sender_email}. "
+        body = f"Hi \n\nYou're model has compiled correctly for the Myriad 2
+        device and is ready for download. \n\nTo download your model use your
+        APIKEY previously provided and then run the folloing command in a bash
+        shell to retrieve your access token: \n\n{get_token} \n\nNext run the
+        following command to download your model: \n\n{download_cmd} \n\nShould
+        you experience any difficulties please contact {admin_email}. "
 
 
         password = os.getenv('PASSWORD')
@@ -533,20 +539,25 @@ spec:
 
         message['To'] = receiver_emails[0]
 
-        message['Cc'] = 'iain.keaney@ubotica.com'
+        message['Cc'] = 'iain.keaney@ubotica.com, maria.buckley@ubotica.com'
 
         html_part = MIMEText(body)
-
 
         message.attach(html_part)
 
 
         print(message.as_string())
 
+        receiver_emails = [receiver_emails, sender_email, admin_email]
+
+        print(receiver_emails)
+
 
         with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
           server.login(sender_email, password)
           server.sendmail(sender_email, receiver_emails, message.as_string())
+          
+          
 ---
 
 apiVersion: triggers.tekton.dev/v1alpha1

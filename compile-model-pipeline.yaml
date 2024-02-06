@@ -519,7 +519,7 @@ spec:
         }/{MODEL_STORE_BUCKET}/{filename} -H "authorization: bearer $TOKEN" -o
         {filename}'
 
-        body = f"Hi \n\nYou're model has compiled correctly for the Myriad X device and is ready for download. \n\nTo download your model use your APIKEY previously provided and then run the folloing command in a bash shell to retrieve your access token: \n\n{get_token} \n\nNext run the following command to download your model: \n\n{download_cmd} \n\nShould you experience any difficulties please contact {sender_email}. "
+        body = f"Hi \n\nYour model has compiled correctly for the Myriad X device and is ready for download. \n\nTo download your model use your APIKEY previously provided and then run the folloing command in a bash shell to retrieve your access token: \n\n{get_token} \n\nNext run the following command to download your model: \n\n{download_cmd} \n\nShould you experience any difficulties please contact {sender_email}. "
 
 
         password = os.getenv('PASSWORD')

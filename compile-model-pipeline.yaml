@@ -69,6 +69,8 @@ spec:
       params:
         - name: model-name
           value: $(tasks.optimise-model.results.model-name)
+        - name: uploaded-file-name
+          value: $(tasks.download-model.results.uploaded-file-name)
       runAfter:
         - optimise-model
       taskRef:
@@ -251,23 +253,17 @@ spec:
         cd /workspace/output
 
 
-        echo $(params.uploaded-file-name) 
-
+        MODEL=$(params.uploaded-file-name)
 
         MODEL=$(params.uploaded-file-name)
 
+        FILE_NAME=$(basename -- ${MODEL})
 
-        echo $(params.model-name) 
-
+        MODELBIN=${FILE_NAME%.*}.bin
 
         MODELNAME=$(params.model-name)
 
-
         echo ${MODELNAME} | tee $(results.model-name.path)
-
-
-        MODELBIN=$MODELNAME.bin
-
 
         INPUTSIZE=$(params.input-size)
 
@@ -279,20 +275,17 @@ spec:
         /opt/intel/openvino_2020.3.355/deployment_tools/model_optimizer/run_mo.py
         --file ${MODEL} --input ${INPUTSIZE}
 
-        chmod 777 $MODELBIN
+        chmod 777 ${FILE_NAME%.*}.bin
 
+        chmod 777 ${FILE_NAME%.*}.mapping
 
-        chmod 777 $MODELNAME.mapping
-
-
-        chmod 777 $MODELNAME.xml
-
+        chmod 777 ${FILE_NAME%.*}.xml
 
         exit 0
   workspaces:
     - description: Compiles .unn model for the Myriad 2 device.
       name: output
-
+      
 ---
 apiVersion: tekton.dev/v1beta1
 kind: Task
@@ -301,6 +294,9 @@ metadata:
 spec:
   params:
     - name: model-name
+      type: string
+    - description: User's object storage bucket
+      name: uploaded-file-name
       type: string
   results:
     - description: the name from the model config.json file
@@ -322,11 +318,17 @@ spec:
 
         echo ${MODELNAME} | tee $(results.model-name.path)
 
-        XML=$MODELNAME.xml
+        MODEL=$(params.uploaded-file-name)
+
+        FILE_NAME=$(basename -- ${MODEL})
+
+        XML=${FILE_NAME%.*}.xml
 
         UNN=$MODELNAME.unn
 
         echo ${UNN} | tee $(results.unn.path)
+
+        echo XML: ${XML}
 
         source /opt/intel/openvino_2020.3.355/bin/setupvars.sh
 
@@ -486,6 +488,8 @@ spec:
 
         import smtplib, os
 
+        from datetime import datetime
+
         from email.mime.multipart import MIMEMultipart
 
         from email.mime.text import MIMEText
@@ -499,6 +503,7 @@ spec:
 
         receiver_emails = '''$(params.recipients)'''
 
+        admin_email = "maria.buckley@ubotica.com"
 
         print(receiver_emails[0])
 
@@ -519,34 +524,45 @@ spec:
         }/{MODEL_STORE_BUCKET}/{filename} -H "authorization: bearer $TOKEN" -o
         {filename}'
 
-        body = f"Hi \n\nYour model has compiled correctly for the Myriad X device and is ready for download. \n\nTo download your model use your APIKEY previously provided and then run the folloing command in a bash shell to retrieve your access token: \n\n{get_token} \n\nNext run the following command to download your model: \n\n{download_cmd} \n\nShould you experience any difficulties please contact {sender_email}. "
+        body = f"Hi \n\nYour model has compiled correctly for the Myriad 2
+        device and is ready for download. \n\nTo download your model use your
+        APIKEY previously provided and then run the folloing command in a bash
+        shell to retrieve your access token: \n\n{get_token} \n\nNext run the
+        following command to download your model: \n\n{download_cmd} \n\nShould
+        you experience any difficulties please contact {admin_email}. "
 
+        now = datetime.now().strftime("%m/%d/%Y, %H:%M:%S")
 
         password = os.getenv('PASSWORD')
 
 
         message = MIMEMultipart()
 
-        message['Subject'] = "$(params.subject)"
+        message['Subject'] = "$(params.subject) " + now
 
         message['From'] = sender_email
 
         message['To'] = receiver_emails[0]
 
-        message['Cc'] = 'iain.keaney@ubotica.com'
+        message['Cc'] = 'iain.keaney@ubotica.com, maria.buckley@ubotica.com'
 
         html_part = MIMEText(body)
-
 
         message.attach(html_part)
 
 
         print(message.as_string())
 
+        receiver_emails = [receiver_emails, sender_email, admin_email]
+
+        print(receiver_emails)
+
 
         with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
           server.login(sender_email, password)
           server.sendmail(sender_email, receiver_emails, message.as_string())
+          
+          
 ---
 
 apiVersion: triggers.tekton.dev/v1alpha1

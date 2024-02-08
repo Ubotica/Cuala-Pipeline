@@ -257,7 +257,9 @@ spec:
 
         MODEL=$(params.uploaded-file-name)
 
-        FILE_NAME=$(basename -- ${MODEL})
+        FILE_NAME=$(basename -- ${MODEL}) 
+
+        echo "filename: ${FILE_NAME}"
 
         MODELBIN=${FILE_NAME%.*}.bin
 
